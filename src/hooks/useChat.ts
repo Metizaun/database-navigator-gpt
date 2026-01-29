@@ -77,7 +77,7 @@ export function useChat() {
     }
   }, []);
 
-  const sendMessage = useCallback(async (content: string) => {
+  const sendMessage = useCallback(async (content: string, databaseTarget: "internal" | "external" = "internal") => {
     if (!content.trim()) return;
 
     setIsLoading(true);
@@ -112,8 +112,8 @@ export function useChat() {
         { role: "user", content },
       ];
 
-      // Send to chat API
-      const response = await sendChatMessage(apiMessages, conversationId);
+      // Send to chat API with database target
+      const response = await sendChatMessage(apiMessages, conversationId, databaseTarget);
 
       if (!response.ok) {
         const error = await response.json();

@@ -157,6 +157,34 @@ export async function fetchExternalMetadata(): Promise<DatabaseMetadata[]> {
   }));
 }
 
+export async function cacheExternalMetadata(metadata: DatabaseMetadata[]): Promise<void> {
+  // Clear old external metadata cache
+  await supabase
+    .from("database_metadata_cache")
+    .delete()
+    .like("id", "external-%");
+
+  // Insert new external metadata with external prefix in schema
+  const toInsert = metadata.map((item) => ({
+    schema_name: `external.${item.schema_name}`,
+    table_name: item.table_name,
+    column_name: item.column_name,
+    data_type: item.data_type,
+    is_nullable: item.is_nullable,
+    column_default: item.column_default,
+  }));
+
+  if (toInsert.length > 0) {
+    const { error } = await supabase
+      .from("database_metadata_cache")
+      .insert(toInsert);
+    
+    if (error) {
+      console.error("Failed to cache external metadata:", error);
+    }
+  }
+}
+
 export async function executeExternalQuery(query: string): Promise<any[]> {
   const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
   const supabaseKey = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
@@ -182,7 +210,8 @@ export async function executeExternalQuery(query: string): Promise<any[]> {
 
 export async function sendChatMessage(
   messages: { role: string; content: string }[],
-  conversationId: string
+  conversationId: string,
+  databaseTarget: "internal" | "external" = "internal"
 ): Promise<Response> {
   const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
   const supabaseKey = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
@@ -194,7 +223,7 @@ export async function sendChatMessage(
       apikey: supabaseKey,
       Authorization: `Bearer ${supabaseKey}`,
     },
-    body: JSON.stringify({ messages, conversationId }),
+    body: JSON.stringify({ messages, conversationId, databaseTarget }),
   });
 }
 

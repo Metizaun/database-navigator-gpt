@@ -32,16 +32,36 @@ serve(async (req) => {
       );
     }
 
-    // Get database metadata for context
+    // Get database metadata for context (internal)
     const { data: metadata } = await supabase
       .from("database_metadata_cache")
       .select("*")
       .order("schema_name, table_name, column_name");
 
-    const metadataContext = metadata && metadata.length > 0
-      ? `\n\nEstrutura do banco de dados disponível:\n${formatMetadata(metadata)}`
-      : "";
+    // Try to get external metadata if configured
+    let externalMetadata: any[] = [];
+    const externalUrl = Deno.env.get("EXTERNAL_SUPABASE_URL");
+    const externalKey = Deno.env.get("EXTERNAL_SUPABASE_SERVICE_KEY");
+    
+    if (externalUrl && externalKey) {
+      try {
+        const externalSupabase = createClient(externalUrl, externalKey);
+        const { data: extData } = await externalSupabase.rpc("get_database_metadata");
+        if (extData) externalMetadata = extData;
+      } catch (e) {
+        console.log("Could not fetch external metadata:", e);
+      }
+    }
 
+    let metadataContext = "";
+    if (metadata && metadata.length > 0) {
+      metadataContext += `\n\nEstrutura do banco de dados interno:\n${formatMetadata(metadata)}`;
+    }
+    if (externalMetadata.length > 0) {
+      metadataContext += `\n\nEstrutura do banco de dados EXTERNO (use este para consultas):\n${formatMetadata(externalMetadata)}`;
+    }
+
+    const hasExternalDb = externalMetadata.length > 0;
     const systemPrompt = `Você é um assistente especializado em análise de banco de dados PostgreSQL.
     
 Suas capacidades:
@@ -55,10 +75,13 @@ RESTRIÇÕES IMPORTANTES:
 - Apenas SELECT e CREATE VIEW são permitidos
 - Sempre valide as queries antes de sugerir
 
+${hasExternalDb ? "IMPORTANTE: O usuário possui um BANCO DE DADOS EXTERNO configurado. Priorize usar a estrutura do banco externo nas suas análises e queries." : ""}
+
 Quando o usuário pedir para executar uma query:
 1. Escreva a query em um bloco de código SQL
 2. Explique o que a query faz
 3. Use a tag especial [EXECUTE_QUERY] antes do bloco SQL se o usuário quiser executar
+4. ${hasExternalDb ? "Use [EXECUTE_EXTERNAL] para queries no banco externo" : ""}
 
 ${metadataContext}`;
 

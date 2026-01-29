@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
@@ -32,7 +33,7 @@ import {
 } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
-import { RefreshCw, Save, Database, Key, Plug, CheckCircle2, XCircle } from "lucide-react";
+import { RefreshCw, Save, Database, Key, Plug, CheckCircle2, XCircle, ArrowLeft } from "lucide-react";
 import { toast } from "sonner";
 
 const formSchema = z.object({
@@ -44,6 +45,7 @@ const formSchema = z.object({
 type FormValues = z.infer<typeof formSchema>;
 
 export default function Admin() {
+  const navigate = useNavigate();
   const { settings, isLoading: settingsLoading, saveSettings, isSaving } = useLLMSettings();
   const { metadata, isLoading: metadataLoading, refresh, isRefreshing, groupedMetadata, refreshExternal, externalMetadata, externalGroupedMetadata } = useMetadata();
   
@@ -149,11 +151,21 @@ export default function Admin() {
   return (
     <div className="flex-1 p-6 overflow-y-auto">
       <div className="max-w-4xl mx-auto space-y-6">
-        <div>
-          <h1 className="text-2xl font-bold">Configurações</h1>
-          <p className="text-muted-foreground">
-            Configure o provedor de LLM e gerencie os metadados do banco de dados.
-          </p>
+        <div className="flex items-center gap-4">
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={() => navigate("/")}
+            className="shrink-0"
+          >
+            <ArrowLeft className="w-5 h-5" />
+          </Button>
+          <div>
+            <h1 className="text-2xl font-bold">Configurações</h1>
+            <p className="text-muted-foreground">
+              Configure o provedor de LLM e gerencie os metadados do banco de dados.
+            </p>
+          </div>
         </div>
 
         <Tabs defaultValue="llm" className="space-y-4">

@@ -2,7 +2,8 @@ import { useChat } from "@/hooks/useChat";
 import AppSidebar from "@/components/sidebar/AppSidebar";
 import ChatMessages from "@/components/chat/ChatMessages";
 import ChatInput from "@/components/chat/ChatInput";
-import { executeQuery } from "@/lib/api";
+import { executeQuery, executeExternalQuery, fetchExternalMetadata } from "@/lib/api";
+import { useEffect, useState } from "react";
 
 export default function Index() {
   const {
@@ -16,8 +17,20 @@ export default function Index() {
     deleteConversation,
     createNewConversation,
   } = useChat();
+  
+  const [hasExternalDb, setHasExternalDb] = useState(false);
 
-  const handleExecuteQuery = async (query: string) => {
+  // Check if external DB is configured
+  useEffect(() => {
+    fetchExternalMetadata()
+      .then((data) => setHasExternalDb(data.length > 0))
+      .catch(() => setHasExternalDb(false));
+  }, []);
+
+  const handleExecuteQuery = async (query: string, isExternal?: boolean) => {
+    if (isExternal || hasExternalDb) {
+      return await executeExternalQuery(query);
+    }
     return await executeQuery(query);
   };
 

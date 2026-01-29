@@ -14,7 +14,122 @@ export type Database = {
   }
   public: {
     Tables: {
-      [_ in never]: never
+      conversations: {
+        Row: {
+          created_at: string
+          id: string
+          title: string
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          title?: string
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          title?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      database_metadata_cache: {
+        Row: {
+          cached_at: string
+          column_default: string | null
+          column_name: string
+          data_type: string
+          id: string
+          is_nullable: boolean
+          schema_name: string
+          table_name: string
+        }
+        Insert: {
+          cached_at?: string
+          column_default?: string | null
+          column_name: string
+          data_type: string
+          id?: string
+          is_nullable?: boolean
+          schema_name: string
+          table_name: string
+        }
+        Update: {
+          cached_at?: string
+          column_default?: string | null
+          column_name?: string
+          data_type?: string
+          id?: string
+          is_nullable?: boolean
+          schema_name?: string
+          table_name?: string
+        }
+        Relationships: []
+      }
+      llm_settings: {
+        Row: {
+          api_key: string
+          created_at: string
+          id: string
+          is_active: boolean
+          model: string
+          provider: string
+          updated_at: string
+        }
+        Insert: {
+          api_key: string
+          created_at?: string
+          id?: string
+          is_active?: boolean
+          model: string
+          provider: string
+          updated_at?: string
+        }
+        Update: {
+          api_key?: string
+          created_at?: string
+          id?: string
+          is_active?: boolean
+          model?: string
+          provider?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      messages: {
+        Row: {
+          content: string
+          conversation_id: string
+          created_at: string
+          id: string
+          role: string
+        }
+        Insert: {
+          content: string
+          conversation_id: string
+          created_at?: string
+          id?: string
+          role: string
+        }
+        Update: {
+          content?: string
+          conversation_id?: string
+          created_at?: string
+          id?: string
+          role?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "messages_conversation_id_fkey"
+            columns: ["conversation_id"]
+            isOneToOne: false
+            referencedRelation: "conversations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
     }
     Views: {
       [_ in never]: never

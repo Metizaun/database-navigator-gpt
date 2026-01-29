@@ -135,7 +135,18 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
-      [_ in never]: never
+      execute_safe_query: { Args: { query_text: string }; Returns: Json }
+      get_database_metadata: {
+        Args: never
+        Returns: {
+          column_default: string
+          column_name: string
+          data_type: string
+          is_nullable: boolean
+          schema_name: string
+          table_name: string
+        }[]
+      }
     }
     Enums: {
       [_ in never]: never

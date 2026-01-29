@@ -1,14 +1,49 @@
-// Update this page (the content is just a fallback if you fail to update the page)
+import { useChat } from "@/hooks/useChat";
+import AppSidebar from "@/components/sidebar/AppSidebar";
+import ChatMessages from "@/components/chat/ChatMessages";
+import ChatInput from "@/components/chat/ChatInput";
+import { executeQuery } from "@/lib/api";
 
-const Index = () => {
+export default function Index() {
+  const {
+    conversations,
+    currentConversationId,
+    messages,
+    isLoading,
+    streamingContent,
+    sendMessage,
+    selectConversation,
+    deleteConversation,
+    createNewConversation,
+  } = useChat();
+
+  const handleExecuteQuery = async (query: string) => {
+    return await executeQuery(query);
+  };
+
   return (
-    <div className="flex min-h-screen items-center justify-center bg-background">
-      <div className="text-center">
-        <h1 className="mb-4 text-4xl font-bold">Welcome to Your Blank App</h1>
-        <p className="text-xl text-muted-foreground">Start building your amazing project here!</p>
-      </div>
+    <div className="flex h-screen bg-background">
+      <AppSidebar
+        conversations={conversations}
+        currentConversationId={currentConversationId}
+        onSelectConversation={selectConversation}
+        onDeleteConversation={deleteConversation}
+        onNewConversation={createNewConversation}
+      />
+
+      <main className="flex-1 flex flex-col">
+        <ChatMessages
+          messages={messages}
+          isLoading={isLoading}
+          streamingContent={streamingContent}
+          onExecuteQuery={handleExecuteQuery}
+        />
+
+        <ChatInput
+          onSend={sendMessage}
+          isLoading={isLoading}
+        />
+      </main>
     </div>
   );
-};
-
-export default Index;
+}

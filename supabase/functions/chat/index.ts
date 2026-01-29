@@ -12,7 +12,7 @@ serve(async (req) => {
   }
 
   try {
-    const { messages, conversationId } = await req.json();
+    const { messages, conversationId, databaseTarget = "internal" } = await req.json();
 
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
     const supabaseKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
@@ -32,36 +32,41 @@ serve(async (req) => {
       );
     }
 
-    // Get database metadata for context (internal)
-    const { data: metadata } = await supabase
-      .from("database_metadata_cache")
-      .select("*")
-      .order("schema_name, table_name, column_name");
-
-    // Try to get external metadata if configured
-    let externalMetadata: any[] = [];
-    const externalUrl = Deno.env.get("EXTERNAL_SUPABASE_URL");
-    const externalKey = Deno.env.get("EXTERNAL_SUPABASE_SERVICE_KEY");
+    let metadataContext = "";
     
-    if (externalUrl && externalKey) {
-      try {
-        const externalSupabase = createClient(externalUrl, externalKey);
-        const { data: extData } = await externalSupabase.rpc("get_database_metadata");
-        if (extData) externalMetadata = extData;
-      } catch (e) {
-        console.log("Could not fetch external metadata:", e);
+    if (databaseTarget === "external") {
+      // Get external database metadata
+      const externalUrl = Deno.env.get("EXTERNAL_SUPABASE_URL");
+      const externalKey = Deno.env.get("EXTERNAL_SUPABASE_SERVICE_KEY");
+      
+      if (externalUrl && externalKey) {
+        try {
+          const externalSupabase = createClient(externalUrl, externalKey);
+          const { data: extData } = await externalSupabase.rpc("get_database_metadata");
+          if (extData && extData.length > 0) {
+            metadataContext = `\n\nEstrutura do BANCO DE DADOS EXTERNO (use este para todas as queries):\n${formatMetadata(extData)}`;
+          }
+        } catch (e) {
+          console.log("Could not fetch external metadata:", e);
+        }
+      }
+    } else {
+      // Get internal database metadata from cache
+      const { data: metadata } = await supabase
+        .from("database_metadata_cache")
+        .select("*")
+        .not("schema_name", "like", "external.%")
+        .order("schema_name, table_name, column_name");
+
+      if (metadata && metadata.length > 0) {
+        metadataContext = `\n\nEstrutura do banco de dados interno:\n${formatMetadata(metadata)}`;
       }
     }
 
-    let metadataContext = "";
-    if (metadata && metadata.length > 0) {
-      metadataContext += `\n\nEstrutura do banco de dados interno:\n${formatMetadata(metadata)}`;
-    }
-    if (externalMetadata.length > 0) {
-      metadataContext += `\n\nEstrutura do banco de dados EXTERNO (use este para consultas):\n${formatMetadata(externalMetadata)}`;
-    }
+    const targetDescription = databaseTarget === "external" 
+      ? "BANCO DE DADOS EXTERNO do usuário" 
+      : "banco de dados interno";
 
-    const hasExternalDb = externalMetadata.length > 0;
     const systemPrompt = `Você é um assistente especializado em análise de banco de dados PostgreSQL.
     
 Suas capacidades:
@@ -70,18 +75,17 @@ Suas capacidades:
 - Analisar estrutura de tabelas e schemas
 - Sugerir otimizações e melhores práticas
 
+CONTEXTO: O usuário está usando o ${targetDescription}.
+
 RESTRIÇÕES IMPORTANTES:
 - Você NÃO pode fazer INSERT, DELETE, UPDATE, DROP, ou TRUNCATE
 - Apenas SELECT e CREATE VIEW são permitidos
 - Sempre valide as queries antes de sugerir
 
-${hasExternalDb ? "IMPORTANTE: O usuário possui um BANCO DE DADOS EXTERNO configurado. Priorize usar a estrutura do banco externo nas suas análises e queries." : ""}
-
 Quando o usuário pedir para executar uma query:
 1. Escreva a query em um bloco de código SQL
 2. Explique o que a query faz
 3. Use a tag especial [EXECUTE_QUERY] antes do bloco SQL se o usuário quiser executar
-4. ${hasExternalDb ? "Use [EXECUTE_EXTERNAL] para queries no banco externo" : ""}
 
 ${metadataContext}`;
 

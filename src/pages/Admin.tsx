@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
@@ -32,7 +32,7 @@ import {
 } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
-import { RefreshCw, Save, Database, Key } from "lucide-react";
+import { RefreshCw, Save, Database, Key, Plug, CheckCircle2, XCircle } from "lucide-react";
 import { toast } from "sonner";
 
 const formSchema = z.object({
@@ -45,7 +45,11 @@ type FormValues = z.infer<typeof formSchema>;
 
 export default function Admin() {
   const { settings, isLoading: settingsLoading, saveSettings, isSaving } = useLLMSettings();
-  const { metadata, isLoading: metadataLoading, refresh, isRefreshing, groupedMetadata } = useMetadata();
+  const { metadata, isLoading: metadataLoading, refresh, isRefreshing, groupedMetadata, refreshExternal, externalMetadata, externalGroupedMetadata } = useMetadata();
+  
+  const [connectionStatus, setConnectionStatus] = useState<"idle" | "testing" | "success" | "error">("idle");
+  const [connectionMessage, setConnectionMessage] = useState("");
+  const [isLoadingExternal, setIsLoadingExternal] = useState(false);
 
   const form = useForm<FormValues>({
     resolver: zodResolver(formSchema),
@@ -92,6 +96,54 @@ export default function Admin() {
     }
   };
 
+  const handleTestConnection = async () => {
+    setConnectionStatus("testing");
+    setConnectionMessage("");
+    
+    try {
+      const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+      const supabaseKey = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
+
+      const response = await fetch(`${supabaseUrl}/functions/v1/external-db-proxy`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          apikey: supabaseKey,
+          Authorization: `Bearer ${supabaseKey}`,
+        },
+        body: JSON.stringify({ action: "test-connection" }),
+      });
+
+      const data = await response.json();
+
+      if (response.ok && data.success) {
+        setConnectionStatus("success");
+        setConnectionMessage(data.message);
+        toast.success("Conexão estabelecida!");
+      } else {
+        setConnectionStatus("error");
+        setConnectionMessage(data.error || "Falha na conexão");
+        toast.error(data.error || "Falha na conexão");
+      }
+    } catch (error) {
+      setConnectionStatus("error");
+      setConnectionMessage("Erro ao testar conexão");
+      toast.error("Erro ao testar conexão");
+    }
+  };
+
+  const handleRefreshExternalMetadata = async () => {
+    setIsLoadingExternal(true);
+    try {
+      await refreshExternal();
+      toast.success("Metadados externos atualizados!");
+    } catch (error: any) {
+      toast.error(error.message || "Erro ao buscar metadados externos");
+    } finally {
+      setIsLoadingExternal(false);
+    }
+  };
+
   const models = selectedProvider === "openai" ? OPENAI_MODELS : GOOGLE_MODELS;
 
   return (
@@ -109,6 +161,10 @@ export default function Admin() {
             <TabsTrigger value="llm" className="gap-2">
               <Key className="w-4 h-4" />
               LLM
+            </TabsTrigger>
+            <TabsTrigger value="external" className="gap-2">
+              <Plug className="w-4 h-4" />
+              Banco Externo
             </TabsTrigger>
             <TabsTrigger value="metadata" className="gap-2">
               <Database className="w-4 h-4" />
@@ -205,14 +261,116 @@ export default function Admin() {
             </Card>
           </TabsContent>
 
+          <TabsContent value="external">
+            <Card>
+              <CardHeader>
+                <CardTitle>Banco de Dados Externo</CardTitle>
+                <CardDescription>
+                  Conecte a um banco de dados Supabase externo para análise.
+                  <br />
+                  <span className="text-xs text-muted-foreground">
+                    Configure os secrets EXTERNAL_SUPABASE_URL e EXTERNAL_SUPABASE_SERVICE_KEY nas configurações do projeto.
+                  </span>
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="flex items-center gap-4">
+                  <Button 
+                    variant="outline" 
+                    onClick={handleTestConnection}
+                    disabled={connectionStatus === "testing"}
+                  >
+                    {connectionStatus === "testing" ? (
+                      <RefreshCw className="w-4 h-4 mr-2 animate-spin" />
+                    ) : (
+                      <Plug className="w-4 h-4 mr-2" />
+                    )}
+                    Testar Conexão
+                  </Button>
+
+                  {connectionStatus === "success" && (
+                    <div className="flex items-center gap-2 text-green-600">
+                      <CheckCircle2 className="w-5 h-5" />
+                      <span className="text-sm">{connectionMessage}</span>
+                    </div>
+                  )}
+
+                  {connectionStatus === "error" && (
+                    <div className="flex items-center gap-2 text-red-600">
+                      <XCircle className="w-5 h-5" />
+                      <span className="text-sm">{connectionMessage}</span>
+                    </div>
+                  )}
+                </div>
+
+                {connectionStatus === "success" && (
+                  <div className="border-t pt-4 space-y-4">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <h4 className="font-medium">Metadados do Banco Externo</h4>
+                        <p className="text-sm text-muted-foreground">
+                          Carregue a estrutura das tabelas do banco externo.
+                        </p>
+                      </div>
+                      <Button
+                        variant="outline"
+                        onClick={handleRefreshExternalMetadata}
+                        disabled={isLoadingExternal}
+                      >
+                        <RefreshCw className={`w-4 h-4 mr-2 ${isLoadingExternal ? "animate-spin" : ""}`} />
+                        Carregar Metadados
+                      </Button>
+                    </div>
+
+                    {Object.keys(externalGroupedMetadata).length > 0 && (
+                      <div className="space-y-4 mt-4">
+                        {Object.entries(externalGroupedMetadata).map(([schema, tables]) => (
+                          <div key={schema}>
+                            <h3 className="text-lg font-semibold mb-2">
+                              Schema: {schema}
+                            </h3>
+                            <div className="space-y-4">
+                              {Object.entries(tables).map(([table, columns]) => (
+                                <div
+                                  key={table}
+                                  className="border rounded-lg p-4 bg-muted/30"
+                                >
+                                  <h4 className="font-medium mb-2">{table}</h4>
+                                  <div className="flex flex-wrap gap-2">
+                                    {columns.map((col) => (
+                                      <Badge
+                                        key={col.column_name}
+                                        variant="secondary"
+                                        className="text-xs"
+                                      >
+                                        {col.column_name}{" "}
+                                        <span className="text-muted-foreground ml-1">
+                                          ({col.data_type})
+                                        </span>
+                                      </Badge>
+                                    ))}
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          </TabsContent>
+
           <TabsContent value="metadata">
             <Card>
               <CardHeader>
                 <div className="flex items-center justify-between">
                   <div>
-                    <CardTitle>Metadados do Banco</CardTitle>
+                    <CardTitle>Metadados do Banco Local</CardTitle>
                     <CardDescription>
-                      Estrutura das tabelas disponíveis para análise.
+                      Estrutura das tabelas disponíveis para análise (banco local).
                     </CardDescription>
                   </div>
                   <Button

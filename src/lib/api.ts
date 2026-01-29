@@ -121,6 +121,65 @@ export async function refreshMetadata(): Promise<void> {
   }
 }
 
+export async function fetchExternalMetadata(): Promise<DatabaseMetadata[]> {
+  const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+  const supabaseKey = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
+
+  const response = await fetch(`${supabaseUrl}/functions/v1/external-db-proxy`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      apikey: supabaseKey,
+      Authorization: `Bearer ${supabaseKey}`,
+    },
+    body: JSON.stringify({ action: "fetch-metadata" }),
+  });
+
+  const result = await response.json();
+
+  if (!response.ok) {
+    throw new Error(result.error || "Failed to fetch external metadata");
+  }
+
+  if (result.hint) {
+    throw new Error(result.message + " " + result.hint);
+  }
+
+  return (result.data || []).map((item: any, index: number) => ({
+    id: `external-${index}`,
+    schema_name: item.schema_name,
+    table_name: item.table_name,
+    column_name: item.column_name,
+    data_type: item.data_type,
+    is_nullable: item.is_nullable,
+    column_default: item.column_default,
+    cached_at: new Date().toISOString(),
+  }));
+}
+
+export async function executeExternalQuery(query: string): Promise<any[]> {
+  const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+  const supabaseKey = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
+
+  const response = await fetch(`${supabaseUrl}/functions/v1/external-db-proxy`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      apikey: supabaseKey,
+      Authorization: `Bearer ${supabaseKey}`,
+    },
+    body: JSON.stringify({ action: "execute-query", query }),
+  });
+
+  const result = await response.json();
+
+  if (!response.ok) {
+    throw new Error(result.error || "Failed to execute query");
+  }
+
+  return result.data || [];
+}
+
 export async function sendChatMessage(
   messages: { role: string; content: string }[],
   conversationId: string

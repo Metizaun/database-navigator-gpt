@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
 import { Message } from "@/types/database";
 import ReactMarkdown from "react-markdown";
 import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
@@ -25,8 +25,50 @@ export default function ChatMessage({ message, onExecuteQuery }: ChatMessageProp
   const [executingQueries, setExecutingQueries] = useState<Record<string, boolean>>({});
   const [queryResults, setQueryResults] = useState<Record<string, any[]>>({});
   const [copiedCode, setCopiedCode] = useState<string | null>(null);
+  const [autoExecuted, setAutoExecuted] = useState<Set<string>>(new Set());
+  const executingRef = useRef<Set<string>>(new Set());
 
   const isUser = message.role === "user";
+
+  // Check for [AUTO_EXECUTE] tag and execute queries automatically
+  useEffect(() => {
+    if (isUser || !message.content) return;
+
+    const autoExecutePattern = /\[AUTO_EXECUTE\]\s*```sql\s*([\s\S]*?)```/gi;
+    let match;
+    let index = 0;
+
+    while ((match = autoExecutePattern.exec(message.content)) !== null) {
+      const query = match[1].trim();
+      const key = `${message.id}-auto-${index}`;
+      
+      // Skip if already executed or currently executing
+      if (autoExecuted.has(key) || executingRef.current.has(key)) {
+        index++;
+        continue;
+      }
+
+      // Mark as executing to prevent duplicates
+      executingRef.current.add(key);
+      
+      // Execute the query
+      (async () => {
+        setExecutingQueries((prev) => ({ ...prev, [key]: true }));
+        try {
+          const results = await onExecuteQuery(query);
+          setQueryResults((prev) => ({ ...prev, [key]: results }));
+          setAutoExecuted((prev) => new Set(prev).add(key));
+        } catch (error) {
+          toast.error(error instanceof Error ? error.message : "Erro ao executar query");
+        } finally {
+          setExecutingQueries((prev) => ({ ...prev, [key]: false }));
+          executingRef.current.delete(key);
+        }
+      })();
+      
+      index++;
+    }
+  }, [message.content, message.id, isUser, onExecuteQuery, autoExecuted]);
 
   const handleCopy = async (code: string) => {
     await navigator.clipboard.writeText(code);
@@ -52,7 +94,16 @@ export default function ChatMessage({ message, onExecuteQuery }: ChatMessageProp
 
   const renderResults = (key: string) => {
     const results = queryResults[key];
-    if (!results || results.length === 0) return null;
+    if (!results || results.length === 0) {
+      if (queryResults[key] !== undefined) {
+        return (
+          <div className="mt-2 p-3 border rounded-lg bg-muted/50">
+            <p className="text-sm text-muted-foreground">Nenhum resultado encontrado.</p>
+          </div>
+        );
+      }
+      return null;
+    }
 
     const columns = Object.keys(results[0]);
 
@@ -91,7 +142,14 @@ export default function ChatMessage({ message, onExecuteQuery }: ChatMessageProp
     );
   };
 
+  // Process content to handle [AUTO_EXECUTE] tags
+  const processedContent = message.content.replace(/\[AUTO_EXECUTE\]\s*/gi, "");
+  
   let codeBlockIndex = 0;
+  let autoExecuteIndex = 0;
+
+  // Check if content has auto-execute queries
+  const hasAutoExecute = /\[AUTO_EXECUTE\]/gi.test(message.content);
 
   return (
     <div
@@ -118,13 +176,18 @@ export default function ChatMessage({ message, onExecuteQuery }: ChatMessageProp
               const code = String(children).replace(/\n$/, "");
               const isSQL = language.toLowerCase() === "sql";
               const currentIndex = codeBlockIndex++;
-              const key = `${message.id}-${currentIndex}`;
+              
+              // Use different key for auto-executed queries
+              const key = hasAutoExecute && isSQL 
+                ? `${message.id}-auto-${autoExecuteIndex++}` 
+                : `${message.id}-${currentIndex}`;
+              
               const isExecuting = executingQueries[key];
 
               if (match) {
                 return (
                   <div className="relative group">
-                    <div className="absolute right-2 top-2 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                    <div className="absolute right-2 top-2 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity z-10">
                       {isSQL && (
                         <Button
                           size="sm"
@@ -138,7 +201,7 @@ export default function ChatMessage({ message, onExecuteQuery }: ChatMessageProp
                           ) : (
                             <Play className="w-3 h-3 mr-1" />
                           )}
-                          Executar
+                          {queryResults[key] ? "Re-executar" : "Executar"}
                         </Button>
                       )}
                       <Button
@@ -154,6 +217,14 @@ export default function ChatMessage({ message, onExecuteQuery }: ChatMessageProp
                         )}
                       </Button>
                     </div>
+                    {isExecuting && (
+                      <div className="absolute inset-0 bg-background/50 rounded-lg flex items-center justify-center z-20">
+                        <div className="flex items-center gap-2 text-sm">
+                          <Loader2 className="w-4 h-4 animate-spin" />
+                          Executando query...
+                        </div>
+                      </div>
+                    )}
                     <SyntaxHighlighter
                       style={vscDarkPlus}
                       language={language}
@@ -175,7 +246,7 @@ export default function ChatMessage({ message, onExecuteQuery }: ChatMessageProp
             },
           }}
         >
-          {message.content}
+          {processedContent}
         </ReactMarkdown>
       </div>
     </div>

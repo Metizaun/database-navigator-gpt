@@ -158,11 +158,11 @@ export async function fetchExternalMetadata(): Promise<DatabaseMetadata[]> {
 }
 
 export async function cacheExternalMetadata(metadata: DatabaseMetadata[]): Promise<void> {
-  // Clear old external metadata cache
+  // Clear old external metadata cache by schema_name prefix
   await supabase
     .from("database_metadata_cache")
     .delete()
-    .like("id", "external-%");
+    .like("schema_name", "external.%");
 
   // Insert new external metadata with external prefix in schema
   const toInsert = metadata.map((item) => ({

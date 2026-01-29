@@ -7,7 +7,7 @@ interface ChatMessagesProps {
   messages: Message[];
   isLoading: boolean;
   streamingContent: string;
-  onExecuteQuery: (query: string) => Promise<any[]>;
+  onExecuteQuery: (query: string, isExternal?: boolean) => Promise<any[]>;
 }
 
 export default function ChatMessages({

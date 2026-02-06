@@ -1,91 +1,99 @@
 
-# Plano: Liberar todas as queries SELECT no banco externo
 
-## Problema identificado
+# Plano: Corrigir erro de sintaxe por ponto e virgula nas queries
 
-Ao solicitar uma "Curva ABC", a query gerada pelo LLM provavelmente usa CTEs (`WITH ... AS SELECT ...`) ou outras construcoes avancadas que estao sendo bloqueadas em **duas camadas de validacao**:
+## Problema
 
-1. **Edge Function `external-db-proxy`** (linhas 62-81): Bloqueia queries que contenham palavras como "DELETE", "UPDATE", "EXECUTE" (mesmo em nomes de colunas ou aliases) e rejeita queries que nao comecem com `SELECT`
-2. **Funcao RPC `execute_safe_query` no banco externo**: Tem a mesma validacao restritiva
+O LLM gera queries SQL que terminam com `;` (ponto e virgula). Quando essa query e passada para a funcao `execute_safe_query`, ela e encapsulada assim:
+
+```text
+SELECT json_agg(t) FROM (SELECT ... ORDER BY x DESC;) t
+                                                    ^
+                                          ponto e virgula invalido aqui
+```
+
+Isso causa o erro `syntax error at or near ";"` porque o PostgreSQL nao aceita `;` dentro de subqueries.
 
 ## O que sera feito
 
-### 1. Remover validacao restritiva do `external-db-proxy`
+### 1. Sanitizar a query no proxy (camada principal de protecao)
 
 **Arquivo:** `supabase/functions/external-db-proxy/index.ts`
 
-- Remover completamente o bloco de validacao de keywords (linhas 62-81)
-- Permitir que qualquer query seja enviada ao banco externo
-- A seguranca fica garantida pelo fato de usar a service key com RPC controlada
+Antes de enviar a query para o RPC, remover o ponto e virgula final e fazer um `trim()`:
 
-### 2. Atualizar o system prompt do chat
+```typescript
+// Sanitize: remove trailing semicolons and whitespace
+const sanitizedQuery = query.trim().replace(/;+\s*$/, "");
+```
+
+Isso garante que **qualquer** query que chegue ao banco ja estara limpa, independente do que o LLM gerar.
+
+### 2. Sanitizar tambem no frontend (dupla protecao)
+
+**Arquivo:** `src/components/chat/ChatMessage.tsx`
+
+No `useEffect` de auto-execucao e na funcao `handleExecute`, limpar a query antes de enviar:
+
+```typescript
+const sanitizedQuery = query.trim().replace(/;+\s*$/, "");
+```
+
+### 3. Atualizar o system prompt do LLM
 
 **Arquivo:** `supabase/functions/chat/index.ts`
 
-- Remover as restricoes do prompt que dizem "nao pode fazer INSERT, DELETE..."
-- Informar ao LLM que ele tem liberdade total para queries de leitura incluindo CTEs, subqueries, window functions, funcoes de agregacao complexas, etc.
-- Manter a instrucao de usar `[AUTO_EXECUTE]` para execucao automatica
+Adicionar instrucao explicita para o LLM **nunca** colocar `;` no final das queries SQL. Isso reduz a chance do problema ocorrer na origem:
 
-### 3. Atualizar `execute_safe_query` no banco externo
-
-Voce precisara executar o seguinte SQL no SQL Editor do seu banco externo para atualizar a funcao `execute_safe_query`, removendo as restricoes de keywords:
-
-```sql
-CREATE OR REPLACE FUNCTION public.execute_safe_query(query_text text)
-RETURNS json
-LANGUAGE plpgsql
-SECURITY DEFINER
-SET search_path TO 'public'
-AS $function$
-DECLARE
-  result json;
-BEGIN
-  EXECUTE format('SELECT json_agg(t) FROM (%s) t', query_text) INTO result;
-  RETURN COALESCE(result, '[]'::json);
-END;
-$function$;
+```text
+IMPORTANTE: NUNCA coloque ponto e virgula (;) no final das queries SQL.
+O sistema encapsula suas queries automaticamente.
 ```
-
-Esta versao simplificada aceita qualquer query SQL, dando total liberdade para consultas complexas como Curva ABC, analises com CTEs e window functions.
 
 ## Resumo das mudancas
 
 | Componente | Mudanca |
 |---|---|
-| `external-db-proxy/index.ts` | Remover validacao de keywords e restricao de prefixo |
-| `chat/index.ts` | Atualizar prompt para permitir queries complexas |
-| Banco externo (manual) | Atualizar funcao `execute_safe_query` para aceitar qualquer query |
+| `external-db-proxy/index.ts` | Adicionar sanitizacao: remover `;` e espaços finais antes do RPC |
+| `ChatMessage.tsx` | Limpar query antes de enviar para execucao |
+| `chat/index.ts` | Instruir LLM a nao usar `;` nas queries |
 
 ## Secao tecnica
 
-### Fluxo de execucao atualizado
+### Detalhes da sanitizacao
 
-```text
-Usuario pergunta "Curva ABC"
-        |
-        v
-  LLM gera query complexa (CTE, Window Functions)
-        |
-        v
-  [AUTO_EXECUTE] detectado no frontend
-        |
-        v
-  executeExternalQuery() -> external-db-proxy
-        |
-        v
-  Proxy repassa query SEM validacao -> RPC execute_safe_query
-        |
-        v
-  Banco externo executa e retorna resultados
-        |
-        v
-  Resultados exibidos em tabela no chat
-```
+A regex `/ ;+\s*$/` remove:
+- Um ou mais `;` no final da string
+- Qualquer espaco em branco apos o `;`
+
+Exemplos:
+- `SELECT * FROM tabela;` -> `SELECT * FROM tabela`
+- `SELECT * FROM tabela ;  ` -> `SELECT * FROM tabela`
+- `WITH cte AS (...) SELECT ...;` -> `WITH cte AS (...) SELECT ...`
 
 ### Arquivos modificados
-- `supabase/functions/external-db-proxy/index.ts` - Remover linhas 62-81 (validacao)
-- `supabase/functions/chat/index.ts` - Atualizar system prompt (linhas 70-106)
-- Reimplantar ambas as edge functions
+- `supabase/functions/external-db-proxy/index.ts` (linha 63 - adicionar sanitizacao antes do RPC)
+- `src/components/chat/ChatMessage.tsx` (linhas 42 e 85 - sanitizar antes de executar)
+- `supabase/functions/chat/index.ts` (linha ~87 - adicionar instrucao no prompt)
+- Reimplantar edge functions `external-db-proxy` e `chat`
 
-### Acao manual necessaria
-Apos a aprovacao, voce precisara atualizar a funcao `execute_safe_query` no SQL Editor do seu banco externo Supabase com o SQL fornecido acima.
+### Fluxo atualizado
+
+```text
+LLM gera: "SELECT ... ORDER BY x DESC;"
+        |
+        v
+  Frontend limpa ";" -> "SELECT ... ORDER BY x DESC"
+        |
+        v
+  external-db-proxy limpa ";" (dupla seguranca)
+        |
+        v
+  execute_safe_query recebe query limpa
+        |
+        v
+  Executa: SELECT json_agg(t) FROM (SELECT ... ORDER BY x DESC) t
+        |
+        v
+  Resultado retornado com sucesso
+```

@@ -1,135 +1,91 @@
 
-# Agente Analista de Banco de Dados
+# Plano: Liberar todas as queries SELECT no banco externo
 
-## Visão Geral
-Um assistente de chat inteligente que analisa e consulta seu banco de dados Supabase, com interface estilo ChatGPT em dark mode. O agente conhece toda a estrutura do seu banco e pode fazer consultas complexas, criar views e analisar dados.
+## Problema identificado
 
----
+Ao solicitar uma "Curva ABC", a query gerada pelo LLM provavelmente usa CTEs (`WITH ... AS SELECT ...`) ou outras construcoes avancadas que estao sendo bloqueadas em **duas camadas de validacao**:
 
-## Funcionalidades Principais
+1. **Edge Function `external-db-proxy`** (linhas 62-81): Bloqueia queries que contenham palavras como "DELETE", "UPDATE", "EXECUTE" (mesmo em nomes de colunas ou aliases) e rejeita queries que nao comecem com `SELECT`
+2. **Funcao RPC `execute_safe_query` no banco externo**: Tem a mesma validacao restritiva
 
-### 1. Chat Interface (Estilo ChatGPT Dark Mode)
-- Design escuro com cor de destaque verde (#10A37F)
-- Mensagens do usuário em caixas arredondadas à direita
-- Respostas do agente limpas à esquerda, com suporte a markdown
-- Input fixo na parte inferior com campo de texto expansível
-- Animações suaves de entrada das mensagens
-- Renderização de código com syntax highlighting
+## O que sera feito
 
-### 2. Agente de Análise de Banco de Dados
-- **Consultas SELECT**: Queries complexas com JOINs, agregações, filtros
-- **Criação de Views**: Permite criar views para análises recorrentes
-- **Análise de Schema**: Lista schemas, tabelas, colunas, tipos de dados
-- **Insights**: Sugestões de otimização e análise de performance
-- **Bloqueios**: INSERT e DELETE são bloqueados pelo sistema
+### 1. Remover validacao restritiva do `external-db-proxy`
 
-### 3. Cache de Metadados
-- Carregamento automático da estrutura do banco ao iniciar
-- Lista de todas as tabelas e colunas disponíveis
-- O agente "conhece" seu banco para fazer sugestões inteligentes
-- Refresh manual dos metadados quando necessário
+**Arquivo:** `supabase/functions/external-db-proxy/index.ts`
 
-### 4. Histórico de Conversas
-- Conversas salvas no banco de dados
-- Lista de conversas anteriores na sidebar
-- Possibilidade de continuar conversas antigas
-- Opção de criar nova conversa
+- Remover completamente o bloco de validacao de keywords (linhas 62-81)
+- Permitir que qualquer query seja enviada ao banco externo
+- A seguranca fica garantida pelo fato de usar a service key com RPC controlada
 
-### 5. Aba Admin - Configurações de LLM
-- **Seleção de Provedor**: Toggle entre OpenAI e Google Gemini
-- **Modelos Disponíveis**:
-  - OpenAI: GPT-4o, GPT-4o-mini, GPT-4 Turbo
-  - Google: Gemini 2.0 Flash, Gemini 1.5 Pro, Gemini 1.5 Flash
-- **Campo de API Key**: Input seguro para inserir sua chave
-- Validação de chave antes de salvar
-- Indicador visual de conexão ativa
+### 2. Atualizar o system prompt do chat
 
----
+**Arquivo:** `supabase/functions/chat/index.ts`
 
-## Layout da Interface
+- Remover as restricoes do prompt que dizem "nao pode fazer INSERT, DELETE..."
+- Informar ao LLM que ele tem liberdade total para queries de leitura incluindo CTEs, subqueries, window functions, funcoes de agregacao complexas, etc.
+- Manter a instrucao de usar `[AUTO_EXECUTE]` para execucao automatica
 
-### Tela Principal
-```
-┌─────────────────────────────────────────────────┐
-│  🗄️ DB Analyst        [Histórico] [Admin]       │
-├─────────────────────────────────────────────────┤
-│                                                 │
-│  ○ Olá! Sou seu analista de banco de dados.    │
-│    Posso ajudar você com consultas, criar      │
-│    views e analisar sua estrutura de dados.    │
-│                                                 │
-│                    ┌─────────────────────────┐  │
-│                    │ Quais tabelas existem?  │  │
-│                    └─────────────────────────┘  │
-│                                                 │
-│  ○ Encontrei 12 tabelas no seu banco:          │
-│    • users (5 colunas)                         │
-│    • orders (8 colunas)                        │
-│    • products (6 colunas)                      │
-│    ...                                         │
-│                                                 │
-├─────────────────────────────────────────────────┤
-│  [                Digite sua mensagem...     →] │
-└─────────────────────────────────────────────────┘
+### 3. Atualizar `execute_safe_query` no banco externo
+
+Voce precisara executar o seguinte SQL no SQL Editor do seu banco externo para atualizar a funcao `execute_safe_query`, removendo as restricoes de keywords:
+
+```sql
+CREATE OR REPLACE FUNCTION public.execute_safe_query(query_text text)
+RETURNS json
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path TO 'public'
+AS $function$
+DECLARE
+  result json;
+BEGIN
+  EXECUTE format('SELECT json_agg(t) FROM (%s) t', query_text) INTO result;
+  RETURN COALESCE(result, '[]'::json);
+END;
+$function$;
 ```
 
-### Tela Admin
+Esta versao simplificada aceita qualquer query SQL, dando total liberdade para consultas complexas como Curva ABC, analises com CTEs e window functions.
+
+## Resumo das mudancas
+
+| Componente | Mudanca |
+|---|---|
+| `external-db-proxy/index.ts` | Remover validacao de keywords e restricao de prefixo |
+| `chat/index.ts` | Atualizar prompt para permitir queries complexas |
+| Banco externo (manual) | Atualizar funcao `execute_safe_query` para aceitar qualquer query |
+
+## Secao tecnica
+
+### Fluxo de execucao atualizado
+
+```text
+Usuario pergunta "Curva ABC"
+        |
+        v
+  LLM gera query complexa (CTE, Window Functions)
+        |
+        v
+  [AUTO_EXECUTE] detectado no frontend
+        |
+        v
+  executeExternalQuery() -> external-db-proxy
+        |
+        v
+  Proxy repassa query SEM validacao -> RPC execute_safe_query
+        |
+        v
+  Banco externo executa e retorna resultados
+        |
+        v
+  Resultados exibidos em tabela no chat
 ```
-┌─────────────────────────────────────────────────┐
-│  ⚙️ Configurações                    [← Voltar] │
-├─────────────────────────────────────────────────┤
-│                                                 │
-│  Provedor de LLM                                │
-│  ┌──────────────────────────────────────────┐   │
-│  │  [OpenAI]          [Google Gemini]       │   │
-│  └──────────────────────────────────────────┘   │
-│                                                 │
-│  Modelo                                         │
-│  ┌──────────────────────────────────────────┐   │
-│  │  GPT-4o                              ▼   │   │
-│  └──────────────────────────────────────────┘   │
-│                                                 │
-│  API Key                                        │
-│  ┌──────────────────────────────────────────┐   │
-│  │  sk-••••••••••••••••••••••••••••••••     │   │
-│  └──────────────────────────────────────────┘   │
-│                                                 │
-│         ● Conexão ativa                         │
-│                                                 │
-│              [ Salvar Configurações ]           │
-│                                                 │
-└─────────────────────────────────────────────────┘
-```
 
----
+### Arquivos modificados
+- `supabase/functions/external-db-proxy/index.ts` - Remover linhas 62-81 (validacao)
+- `supabase/functions/chat/index.ts` - Atualizar system prompt (linhas 70-106)
+- Reimplantar ambas as edge functions
 
-## Fluxo do Usuário
-
-1. **Primeiro Acesso**: Usuário é direcionado para Admin para configurar API key
-2. **Configuração**: Escolhe provedor, modelo e insere a chave
-3. **Cache Inicial**: Sistema carrega metadados do banco automaticamente
-4. **Interação**: Usuário faz perguntas sobre o banco de dados
-5. **Histórico**: Conversas são salvas automaticamente para consulta futura
-
----
-
-## Estrutura Técnica
-
-### Tabelas no Supabase
-- `conversations`: Armazena as conversas
-- `messages`: Armazena mensagens de cada conversa
-- `llm_settings`: Armazena configurações de LLM (chave criptografada)
-- `database_metadata_cache`: Cache da estrutura do banco
-
-### Edge Functions
-- `chat`: Processa mensagens e chama a LLM escolhida
-- `fetch-metadata`: Busca estrutura do banco de dados
-- `execute-query`: Executa queries seguras (apenas SELECT e CREATE VIEW)
-
----
-
-## Segurança
-- API keys armazenadas de forma segura nas configurações
-- Queries validadas no backend - apenas SELECT e CREATE VIEW permitidos
-- INSERT, DELETE, UPDATE, DROP, TRUNCATE são bloqueados
-- Logs de todas as queries executadas
+### Acao manual necessaria
+Apos a aprovacao, voce precisara atualizar a funcao `execute_safe_query` no SQL Editor do seu banco externo Supabase com o SQL fornecido acima.

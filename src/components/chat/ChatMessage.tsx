@@ -39,7 +39,7 @@ export default function ChatMessage({ message, onExecuteQuery }: ChatMessageProp
     let index = 0;
 
     while ((match = autoExecutePattern.exec(message.content)) !== null) {
-      const query = match[1].trim();
+      const query = match[1].trim().replace(/;+\s*$/, "");
       const key = `${message.id}-auto-${index}`;
       
       // Skip if already executed or currently executing
@@ -79,10 +79,11 @@ export default function ChatMessage({ message, onExecuteQuery }: ChatMessageProp
 
   const handleExecute = async (code: string, index: number) => {
     const key = `${message.id}-${index}`;
+    const sanitizedCode = code.trim().replace(/;+\s*$/, "");
     setExecutingQueries((prev) => ({ ...prev, [key]: true }));
 
     try {
-      const results = await onExecuteQuery(code);
+      const results = await onExecuteQuery(sanitizedCode);
       setQueryResults((prev) => ({ ...prev, [key]: results }));
       toast.success("Query executada com sucesso!");
     } catch (error) {

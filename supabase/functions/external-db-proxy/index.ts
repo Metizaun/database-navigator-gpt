@@ -59,8 +59,11 @@ serve(async (req) => {
         );
       }
 
+      // Sanitize: remove trailing semicolons and whitespace that break subquery wrapping
+      const sanitizedQuery = query.trim().replace(/;+\s*$/, "");
+      
       // Execute on external database (sem validação restritiva - queries complexas permitidas)
-      const { data, error } = await externalSupabase.rpc("execute_safe_query", { query_text: query });
+      const { data, error } = await externalSupabase.rpc("execute_safe_query", { query_text: sanitizedQuery });
 
       if (error) {
         return new Response(

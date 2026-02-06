@@ -59,28 +59,7 @@ serve(async (req) => {
         );
       }
 
-      // Validate query security
-      const upperQuery = query.toUpperCase().trim();
-      const forbiddenKeywords = ["INSERT", "DELETE", "UPDATE", "DROP", "TRUNCATE", "ALTER", "GRANT", "REVOKE", "EXEC", "EXECUTE"];
-      
-      for (const keyword of forbiddenKeywords) {
-        const regex = new RegExp(`\\b${keyword}\\b`, "i");
-        if (regex.test(upperQuery)) {
-          return new Response(
-            JSON.stringify({ error: `Operação "${keyword}" não é permitida.` }),
-            { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-          );
-        }
-      }
-
-      if (!upperQuery.startsWith("SELECT") && !upperQuery.startsWith("CREATE VIEW") && !upperQuery.startsWith("CREATE OR REPLACE VIEW")) {
-        return new Response(
-          JSON.stringify({ error: "Apenas SELECT e CREATE VIEW são permitidos." }),
-          { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-        );
-      }
-
-      // Execute on external database
+      // Execute on external database (sem validação restritiva - queries complexas permitidas)
       const { data, error } = await externalSupabase.rpc("execute_safe_query", { query_text: query });
 
       if (error) {

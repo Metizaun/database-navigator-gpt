@@ -1,5 +1,5 @@
 import { supabase } from "@/integrations/supabase/client";
-import { Message, Conversation, LLMSettings, DatabaseMetadata } from "@/types/database";
+import { Message, Conversation, LLMSettings, DatabaseMetadata, Agent, AgentTable } from "@/types/database";
 
 export async function getConversations(): Promise<Conversation[]> {
   const { data, error } = await supabase
@@ -11,10 +11,13 @@ export async function getConversations(): Promise<Conversation[]> {
   return data || [];
 }
 
-export async function createConversation(title?: string): Promise<Conversation> {
+export async function createConversation(title?: string, agentId?: string): Promise<Conversation> {
+  const insertData: any = { title: title || "Nova Conversa" };
+  if (agentId) insertData.agent_id = agentId;
+  
   const { data, error } = await supabase
     .from("conversations")
-    .insert({ title: title || "Nova Conversa" })
+    .insert(insertData)
     .select()
     .single();
 
@@ -211,7 +214,8 @@ export async function executeExternalQuery(query: string): Promise<any[]> {
 export async function sendChatMessage(
   messages: { role: string; content: string }[],
   conversationId: string,
-  databaseTarget: "internal" | "external" = "internal"
+  databaseTarget: "internal" | "external" = "internal",
+  agentId?: string
 ): Promise<Response> {
   const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
   const supabaseKey = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
@@ -223,8 +227,93 @@ export async function sendChatMessage(
       apikey: supabaseKey,
       Authorization: `Bearer ${supabaseKey}`,
     },
-    body: JSON.stringify({ messages, conversationId, databaseTarget }),
+    body: JSON.stringify({ messages, conversationId, databaseTarget, agentId }),
   });
+}
+
+// ===== AGENTS API =====
+
+export async function getAgents(): Promise<Agent[]> {
+  const { data, error } = await supabase
+    .from("agents")
+    .select("*")
+    .order("created_at", { ascending: false });
+
+  if (error) throw error;
+  return (data || []) as unknown as Agent[];
+}
+
+export async function getAgent(id: string): Promise<Agent> {
+  const { data, error } = await supabase
+    .from("agents")
+    .select("*")
+    .eq("id", id)
+    .single();
+
+  if (error) throw error;
+  return data as unknown as Agent;
+}
+
+export async function createAgent(agent: {
+  name: string;
+  description?: string;
+  system_prompt?: string | null;
+}): Promise<Agent> {
+  const { data, error } = await supabase
+    .from("agents")
+    .insert(agent)
+    .select()
+    .single();
+
+  if (error) throw error;
+  return data as unknown as Agent;
+}
+
+export async function updateAgent(id: string, agent: {
+  name?: string;
+  description?: string;
+  system_prompt?: string | null;
+}): Promise<Agent> {
+  const { data, error } = await supabase
+    .from("agents")
+    .update(agent)
+    .eq("id", id)
+    .select()
+    .single();
+
+  if (error) throw error;
+  return data as unknown as Agent;
+}
+
+export async function deleteAgent(id: string): Promise<void> {
+  const { error } = await supabase.from("agents").delete().eq("id", id);
+  if (error) throw error;
+}
+
+export async function getAgentTables(agentId: string): Promise<AgentTable[]> {
+  const { data, error } = await supabase
+    .from("agent_tables")
+    .select("*")
+    .eq("agent_id", agentId);
+
+  if (error) throw error;
+  return (data || []) as unknown as AgentTable[];
+}
+
+export async function setAgentTables(
+  agentId: string,
+  tables: { schema_name: string; table_name: string }[]
+): Promise<void> {
+  // Delete existing
+  await supabase.from("agent_tables").delete().eq("agent_id", agentId);
+
+  // Insert new
+  if (tables.length > 0) {
+    const { error } = await supabase
+      .from("agent_tables")
+      .insert(tables.map((t) => ({ agent_id: agentId, ...t })));
+    if (error) throw error;
+  }
 }
 
 export async function executeQuery(query: string): Promise<any[]> {

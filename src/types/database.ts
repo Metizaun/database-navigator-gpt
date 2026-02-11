@@ -47,3 +47,20 @@ export const GOOGLE_MODELS = [
   "gemini-1.5-flash",
   "gemini-pro",
 ];
+
+export interface Agent {
+  id: string;
+  name: string;
+  description: string;
+  system_prompt: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface AgentTable {
+  id: string;
+  agent_id: string;
+  schema_name: string;
+  table_name: string;
+  created_at: string;
+}

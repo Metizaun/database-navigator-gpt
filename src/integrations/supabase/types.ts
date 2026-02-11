@@ -14,26 +14,96 @@ export type Database = {
   }
   public: {
     Tables: {
+      agent_tables: {
+        Row: {
+          agent_id: string
+          created_at: string
+          id: string
+          schema_name: string
+          table_name: string
+        }
+        Insert: {
+          agent_id: string
+          created_at?: string
+          id?: string
+          schema_name: string
+          table_name: string
+        }
+        Update: {
+          agent_id?: string
+          created_at?: string
+          id?: string
+          schema_name?: string
+          table_name?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "agent_tables_agent_id_fkey"
+            columns: ["agent_id"]
+            isOneToOne: false
+            referencedRelation: "agents"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      agents: {
+        Row: {
+          created_at: string
+          description: string | null
+          id: string
+          name: string
+          system_prompt: string | null
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          description?: string | null
+          id?: string
+          name: string
+          system_prompt?: string | null
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          description?: string | null
+          id?: string
+          name?: string
+          system_prompt?: string | null
+          updated_at?: string
+        }
+        Relationships: []
+      }
       conversations: {
         Row: {
+          agent_id: string | null
           created_at: string
           id: string
           title: string
           updated_at: string
         }
         Insert: {
+          agent_id?: string | null
           created_at?: string
           id?: string
           title?: string
           updated_at?: string
         }
         Update: {
+          agent_id?: string | null
           created_at?: string
           id?: string
           title?: string
           updated_at?: string
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "conversations_agent_id_fkey"
+            columns: ["agent_id"]
+            isOneToOne: false
+            referencedRelation: "agents"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       database_metadata_cache: {
         Row: {

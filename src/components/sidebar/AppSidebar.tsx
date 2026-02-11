@@ -1,5 +1,5 @@
 import { Link, useLocation } from "react-router-dom";
-import { Database, Settings, MessageSquare } from "lucide-react";
+import { Database, Settings, MessageSquare, Home } from "lucide-react";
 import { cn } from "@/lib/utils";
 import ConversationList from "./ConversationList";
 import { Conversation } from "@/types/database";
@@ -10,6 +10,7 @@ interface AppSidebarProps {
   onSelectConversation: (id: string) => void;
   onDeleteConversation: (id: string) => void;
   onNewConversation: () => void;
+  agentId?: string;
 }
 
 export default function AppSidebar({
@@ -18,6 +19,7 @@ export default function AppSidebar({
   onSelectConversation,
   onDeleteConversation,
   onNewConversation,
+  agentId,
 }: AppSidebarProps) {
   const location = useLocation();
 
@@ -35,13 +37,23 @@ export default function AppSidebar({
           to="/"
           className={cn(
             "flex items-center gap-2 px-3 py-2 rounded-lg text-sm transition-colors",
-            location.pathname === "/"
+            "hover:bg-accent"
+          )}
+        >
+          <Home className="w-4 h-4" />
+          Home
+        </Link>
+        <Link
+          to="/chat"
+          className={cn(
+            "flex items-center gap-2 px-3 py-2 rounded-lg text-sm transition-colors",
+            location.pathname.startsWith("/chat")
               ? "bg-primary text-primary-foreground"
               : "hover:bg-accent"
           )}
         >
           <MessageSquare className="w-4 h-4" />
-          Chat
+          Chat {agentId ? "(Agente)" : ""}
         </Link>
         <Link
           to="/admin"

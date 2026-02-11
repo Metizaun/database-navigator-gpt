@@ -12,7 +12,7 @@ serve(async (req) => {
   }
 
   try {
-    const { messages, conversationId, databaseTarget = "internal" } = await req.json();
+    const { messages, conversationId, databaseTarget = "internal", agentId } = await req.json();
 
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
     const supabaseKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
@@ -32,17 +32,46 @@ serve(async (req) => {
       );
     }
 
+    // ===== Agent logic =====
+    let agentContext = null;
+    if (agentId) {
+      const { data: agent } = await supabase
+        .from("agents")
+        .select("*")
+        .eq("id", agentId)
+        .single();
+
+      if (agent) {
+        const { data: agentTables } = await supabase
+          .from("agent_tables")
+          .select("*")
+          .eq("agent_id", agentId);
+
+        agentContext = { agent, tables: agentTables || [] };
+      }
+    }
+
     let metadataContext = "";
     
     if (databaseTarget === "external") {
-      // Get external database metadata
       const externalUrl = Deno.env.get("EXTERNAL_SUPABASE_URL");
       const externalKey = Deno.env.get("EXTERNAL_SUPABASE_SERVICE_KEY");
       
       if (externalUrl && externalKey) {
         try {
           const externalSupabase = createClient(externalUrl, externalKey);
-          const { data: extData } = await externalSupabase.rpc("get_database_metadata");
+          let { data: extData } = await externalSupabase.rpc("get_database_metadata");
+          
+          // Filter by agent tables if applicable
+          if (agentContext && agentContext.tables.length > 0) {
+            const allowedTables = new Set(
+              agentContext.tables.map((t: any) => `${t.schema_name}.${t.table_name}`)
+            );
+            extData = (extData || []).filter((row: any) => 
+              allowedTables.has(`${row.schema_name}.${row.table_name}`)
+            );
+          }
+          
           if (extData && extData.length > 0) {
             metadataContext = `\n\nEstrutura do BANCO DE DADOS EXTERNO (use este para todas as queries):\n${formatMetadata(extData)}`;
           }
@@ -51,23 +80,59 @@ serve(async (req) => {
         }
       }
     } else {
-      // Get internal database metadata from cache
       const { data: metadata } = await supabase
         .from("database_metadata_cache")
         .select("*")
         .not("schema_name", "like", "external.%")
         .order("schema_name, table_name, column_name");
 
-      if (metadata && metadata.length > 0) {
-        metadataContext = `\n\nEstrutura do banco de dados interno:\n${formatMetadata(metadata)}`;
+      let filteredMetadata = metadata || [];
+
+      // Filter by agent tables if applicable
+      if (agentContext && agentContext.tables.length > 0) {
+        const allowedTables = new Set(
+          agentContext.tables.map((t: any) => `${t.schema_name}.${t.table_name}`)
+        );
+        filteredMetadata = filteredMetadata.filter((row: any) =>
+          allowedTables.has(`${row.schema_name}.${row.table_name}`)
+        );
+      }
+
+      if (filteredMetadata.length > 0) {
+        metadataContext = `\n\nEstrutura do banco de dados interno:\n${formatMetadata(filteredMetadata)}`;
       }
     }
 
+    // ===== Build system prompt =====
     const targetDescription = databaseTarget === "external" 
       ? "BANCO DE DADOS EXTERNO do usuário" 
       : "banco de dados interno";
 
-    const systemPrompt = `Você é um assistente especializado em análise de banco de dados PostgreSQL.
+    let behaviorPrompt: string;
+
+    if (agentContext) {
+      const tablesList = agentContext.tables
+        .map((t: any) => `${t.schema_name}.${t.table_name}`)
+        .join(", ");
+
+      if (agentContext.agent.system_prompt) {
+        behaviorPrompt = agentContext.agent.system_prompt;
+      } else {
+        behaviorPrompt = `Você é ${agentContext.agent.name}, um assistente de inteligência de negócios especializado nas áreas: ${tablesList}.
+
+Seu papel é atuar como um analista senior dedicado ao negócio do usuário.
+Você deve:
+- Responder com profundidade e contexto de negócio, não apenas dados brutos
+- Ao apresentar resultados, sempre interpretar o que os números significam para o negócio (tendências, alertas, oportunidades)
+- Sugerir proativamente análises complementares relevantes
+- Usar linguagem profissional mas acessível
+- Quando o usuário perguntar algo genérico, direcionar para as tabelas que você domina e oferecer opções de análise
+
+Você só tem acesso às seguintes tabelas: ${tablesList}
+Gere queries APENAS sobre essas tabelas.`;
+      }
+    } else {
+      behaviorPrompt = `Você é um assistente especializado em análise de banco de dados PostgreSQL.
     
 Suas capacidades:
 - Criar queries SELECT de qualquer complexidade
@@ -78,8 +143,10 @@ Suas capacidades:
 - Análises avançadas como Curva ABC, Pareto, rankings, médias móveis
 - Sugerir otimizações e melhores práticas
 
-CONTEXTO: O usuário está usando o ${targetDescription}.
+CONTEXTO: O usuário está usando o ${targetDescription}.`;
+    }
 
+    const technicalInstructions = `
 LIBERDADE TOTAL PARA QUERIES DE LEITURA:
 - Você tem liberdade total para criar qualquer query de leitura/análise
 - Use CTEs, subqueries, window functions, CASE WHEN, e qualquer recurso do PostgreSQL
@@ -107,9 +174,9 @@ Exemplo:
 \`\`\`sql
 SELECT SUM(valor) as lucro_total FROM vendas WHERE YEAR(data) = 2023
 \`\`\`
-"
+"`;
 
-${metadataContext}`;
+    const systemPrompt = `${behaviorPrompt}\n${technicalInstructions}\n${metadataContext}`;
 
     let response;
     

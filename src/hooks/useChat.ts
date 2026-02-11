@@ -11,7 +11,7 @@ import {
 } from "@/lib/api";
 import { toast } from "sonner";
 
-export function useChat() {
+export function useChat(agentId?: string) {
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [currentConversationId, setCurrentConversationId] = useState<string | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
@@ -69,13 +69,13 @@ export function useChat() {
 
   const createNewConversation = useCallback(async () => {
     try {
-      const newConversation = await createConversation();
+      const newConversation = await createConversation(undefined, agentId);
       setConversations((prev) => [newConversation, ...prev]);
       setCurrentConversationId(newConversation.id);
     } catch (error) {
       toast.error("Erro ao criar conversa");
     }
-  }, []);
+  }, [agentId]);
 
   const sendMessage = useCallback(async (content: string, databaseTarget: "internal" | "external" = "internal") => {
     if (!content.trim()) return;
@@ -87,7 +87,7 @@ export function useChat() {
       // Create conversation if needed
       let conversationId = currentConversationId;
       if (!conversationId) {
-        const newConversation = await createConversation();
+        const newConversation = await createConversation(undefined, agentId);
         setConversations((prev) => [newConversation, ...prev]);
         conversationId = newConversation.id;
         setCurrentConversationId(conversationId);
@@ -113,7 +113,7 @@ export function useChat() {
       ];
 
       // Send to chat API with database target
-      const response = await sendChatMessage(apiMessages, conversationId, databaseTarget);
+      const response = await sendChatMessage(apiMessages, conversationId, databaseTarget, agentId);
 
       if (!response.ok) {
         const error = await response.json();
@@ -169,7 +169,7 @@ export function useChat() {
       setIsLoading(false);
       setStreamingContent("");
     }
-  }, [currentConversationId, messages]);
+  }, [currentConversationId, messages, agentId]);
 
   return {
     conversations,
